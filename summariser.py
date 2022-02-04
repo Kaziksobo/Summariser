@@ -38,13 +38,18 @@ def article_scraper(text):
 def summary_generator(text):
     # creates summary using BART transformer
     # the model used:
-    pre_trained_model = 'facebook/bart-large-cnn'
+    checkpoint = 'facebook/bart-large-cnn'
     # creates tokenizer, pretrained on the model
-    tokenizer = BartTokenizer.from_pretrained(pre_trained_model)
+    tokenizer = BartTokenizer.from_pretrained(checkpoint)
     # tokenizes the input using created tokenizer, sets the maximum token length to the max length of the model used, uses pytorch tensors
-    inputs = tokenizer.batch_encode_plus([text], truncation=True, max_length=tokenizer.model_max_length, return_tensors='pt')
+    inputs = tokenizer.batch_encode_plus(
+        [text], 
+        truncation=True, 
+        max_length=tokenizer.model_max_length, 
+        return_tensors='pt'
+        )
     # creates model using BART for conditional generation, pretrained on model
-    model = BartForConditionalGeneration.from_pretrained(pre_trained_model)
+    model = BartForConditionalGeneration.from_pretrained(checkpoint)
     # selects the sumary tokens
     summary_ids = model.generate(inputs['input_ids'])
     # decodes the summary tokens, not counting any special tokens the model may have generated
