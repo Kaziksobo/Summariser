@@ -122,7 +122,7 @@ ui = gradio.Interface(
     title='Summariser',
     description=description,
     article=explanation,
-    theme='dark-grass',
+    theme='dark-peach',
     flagging_options=['Incorrect accuracy score', 'Incorrect text summarised', 'other']
 )
 
