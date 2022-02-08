@@ -1,6 +1,6 @@
 # summariser
 
-## Exaplanation
+## Explanation
 
 If a url is inputted, the program will use the [newspaper3k module](https://pypi.org/project/newspaper3k/) to scrape the text of the article.\
 Otherwise, the program will then use the [wikipedia api](https://github.com/martin-majlis/Wikipedia-API/) to find the corresponding article for the text inputted, and then get the text of the article.\
