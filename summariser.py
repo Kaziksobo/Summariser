@@ -1,6 +1,7 @@
 from transformers import BartForConditionalGeneration, BartTokenizer
 from newspaper import Article
 from validators import url
+from datetime import datetime
 from nltk.tokenize import sent_tokenize
 from rouge import Rouge
 import gradio
@@ -35,12 +36,16 @@ def article_scraper(text):
     # returns - article text in one line, title of article
     return article.text.replace('\n', ''), article.title
 
-def summary_generator(text):
+def summary_generator(text, length):
+    # converts from a scale of 0 - 100 to 50 - 1024
+    new_length = ((length * 974) / 100) + 50
+    new_length = int(round(new_length))
     # creates summary using BART transformer
     # the model used:
     checkpoint = 'facebook/bart-large-cnn'
     # creates tokenizer, pretrained on the model
     tokenizer = BartTokenizer.from_pretrained(checkpoint)
+    print(f'created tokenizer - {datetime.now().time()}')
     # tokenizes the input using created tokenizer, sets the maximum token length to the max length of the model used, uses pytorch tensors
     inputs = tokenizer.batch_encode_plus(
         [text], 
@@ -48,12 +53,21 @@ def summary_generator(text):
         max_length=tokenizer.model_max_length, 
         return_tensors='pt'
         )
+    print(f'tokenized inputs - {datetime.now().time()}')
     # creates model using BART for conditional generation, pretrained on model
     model = BartForConditionalGeneration.from_pretrained(checkpoint)
+    print(f'created model - {datetime.now().time()}')
     # selects the sumary tokens
-    summary_ids = model.generate(inputs['input_ids'])
+    summary_ids = model.generate(
+        inputs['input_ids'],
+        max_length=new_length,
+        min_length=new_length
+        )
+    print(f'generated summary ids - {datetime.now().time()}')
     # decodes the summary tokens, not counting any special tokens the model may have generated
-    return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    print(f'Generated summary - {datetime.now().time()}')
+    return summary
 
 def summary_score(summary, text):
     # Uses Rouge to check the accuracy of the summary
@@ -66,7 +80,7 @@ def summary_score(summary, text):
     # just uses the F1 score from rouge-2
     return scores['rouge-2']['f']
 
-def summariser(text):
+def summariser(text, length):
     # returns - error, text_title, summary
     if url(text):
         # if url inputted, summarise the article in that url
@@ -79,7 +93,7 @@ def summariser(text):
         if not text:
             return 'That topic cannot be summarised', None, None
     
-    summary = summary_generator(text)
+    summary = summary_generator(text, length)
 
     new_summary = sent_tokenize(summary)
     if new_summary[-1][-1] != '.':
@@ -111,7 +125,16 @@ explanation = """<p style="text-align: center;">
 ui = gradio.Interface(
     summariser, 
     [
-        gradio.inputs.Textbox(placeholder='Enter topic/link to article', label = 'Text')
+        gradio.inputs.Textbox(
+            placeholder='Enter topic/link to article', 
+            label = 'Text'
+        ),
+        gradio.inputs.Slider(
+            minimum=0,
+            maximum=100,
+            step=1,
+            label='Summary length'
+        )
     ],
     [
         gradio.outputs.Textbox(label = 'Error'),
