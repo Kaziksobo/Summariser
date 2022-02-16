@@ -1,107 +1,51 @@
-from transformers import BartForConditionalGeneration, BartTokenizer
-from newspaper import Article
-from validators import url
-from datetime import datetime
-from nltk.tokenize import sent_tokenize
-from rouge import Rouge
+from csv import writer
 import gradio
-import wikipedia as wiki_lib
-import wikipediaapi
-wiki_api = wikipediaapi.Wikipedia('en')
+from time import time
+from validators import url
+from nltk.tokenize import sent_tokenize
+import os
+from summariser_functions import article_scraper, csv_checker, wiki_scraper, summary_generator, summary_score, log, report
 
-def wiki_scraper(text):
-    # gets text content of corresponding wikipedia page
-    wikisearch = wiki_api.page(text)
-    if wikisearch.exists():
-        text_title = wiki_lib.page(text).title
-    else:
-        # if no wiki page for input text, use wiki lib's search function and take first result
-        try:
-            text = wiki_lib.search(text)[0]
-            text_title = text
-        except:
-            return '', ''
-        wikisearch = wiki_api.page(text)
-    # returns - text of wiki page, title of wiki page
-    return wikisearch.text, text_title
-
-def article_scraper(text):
-    #get text content of article
-    try:
-        article = Article(text)
-        article.download()
-        article.parse()
-    except:
-        return '', ''
-    # returns - article text in one line, title of article
-    return article.text.replace('\n', ''), article.title
-
-def summary_generator(text, length):
-    # converts from a scale of 0 - 100 to 50 - 1024
-    new_length = ((length * 974) / 100) + 50
-    new_length = int(round(new_length))
-    # creates summary using BART transformer
-    # the model used:
-    checkpoint = 'facebook/bart-large-cnn'
-    # creates tokenizer, pretrained on the model
-    tokenizer = BartTokenizer.from_pretrained(checkpoint)
-    print(f'created tokenizer - {datetime.now().time()}')
-    # tokenizes the input using created tokenizer, sets the maximum token length to the max length of the model used, uses pytorch tensors
-    inputs = tokenizer.batch_encode_plus(
-        [text], 
-        truncation=True, 
-        max_length=tokenizer.model_max_length, 
-        return_tensors='pt'
-        )
-    print(f'tokenized inputs - {datetime.now().time()}')
-    # creates model using BART for conditional generation, pretrained on model
-    model = BartForConditionalGeneration.from_pretrained(checkpoint)
-    print(f'created model - {datetime.now().time()}')
-    # selects the sumary tokens
-    summary_ids = model.generate(
-        inputs['input_ids'],
-        max_length=new_length,
-        min_length=new_length
-        )
-    print(f'generated summary ids - {datetime.now().time()}')
-    # decodes the summary tokens, not counting any special tokens the model may have generated
-    summary = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
-    print(f'Generated summary - {datetime.now().time()}')
-    return summary
-
-def summary_score(summary, text):
-    # Uses Rouge to check the accuracy of the summary
-    # creates the reference summary using the first 3 sentences of the text 
-    # (may not be the best way to do it but I can't think of a better way)
-    reference_summary = '\n'.join(sent_tokenize(text)[:3])
-    # calculates the Rouge scores of the summary compared with the reference summary
-    scores = (Rouge().get_scores(summary, reference_summary))[0]
-    # scores_list = [scores['rouge-1']['f'], scores['rouge-2']['f'], scores['rouge-l']['f']]
-    # just uses the F1 score from rouge-2
-    return scores['rouge-2']['f']
-
-def summariser(text, length):
+def summariser(text_inputted):
     # returns - error, text_title, summary
-    if url(text):
-        # if url inputted, summarise the article in that url
-        text, text_title = article_scraper(text)
-        if not text:
-            return 'That article cannot be summarised', None, None
-    else:
-        # if input not url, summarise wiki article of input
-        text, text_title = wiki_scraper(text)
-        if not text:
-            return 'That topic cannot be summarised', None, None
+    try:
+        file = open('log.csv', 'r')
+    except FileNotFoundError:
+        file = open('log.csv', 'w')
+        csv_writer = writer(file)
+        csv_writer.writerow(['text title', 'summary', 'score', 'generation time', 'datetime'])
+    file.close()
+    start = time()
+    text, text_title = article_scraper(text_inputted) if url(text_inputted) else wiki_scraper(text_inputted)
+    if text_title == 'Error':
+        return 'That input could not be summarised', None, None
+    print(f'summarising {text_title}')
+    summary = None
+    summary, score = csv_checker(text_title)
+    if not summary:
+        summary = summary_generator(text)
+        # fixing summary format
+        summary = sent_tokenize(summary)
+        if summary[-1][-1] != '.':
+            summary.pop()
+        summary = ' '.join(summary)
+        summary = summary.replace('; ', '')
+
+        score = round(summary_score(summary, text), 2)
+
+    print(score)
+
+    end = time()
+    timer = round(end - start, 2)
+    print(f'summary generated in {timer}s')
+    log(text_title, summary, score, timer)
     
-    summary = summary_generator(text, length)
+    # calculates reduction in size from the original text to the summary
+    reduction = round(((len(text) - len(summary)) / len(text)) * 100, 2)
 
-    new_summary = sent_tokenize(summary)
-    if new_summary[-1][-1] != '.':
-        new_summary.pop()
-    summary = ' '.join(new_summary)
-    summary = summary.replace('; ', '')
+    error = ''
 
-    score = summary_score(summary, text)
+    score = round(summary_score(summary, text), 2)
 
     # if the rouge score is under 0.4, it will return the summary, along with an error message stating the low rouge score
     # (this number is arbitrarily picked, might be a good choice, might not be, who knows???)
@@ -118,7 +62,7 @@ explanation = """<p style="text-align: center;">
     Otherwise, the program will then use the <a href="https://github.com/martin-majlis/Wikipedia-API/">wikipedia api</a> to find the corresponding article for the text inputted. It will then get the text of the article.<br>
     Then a <a href="https://arxiv.org/pdf/1910.13461.pdf">BART transformer</a> (using the <a href="https://huggingface.co/facebook/bart-large-cnn">bart-large-cnn</a> model) is used to generate a summary of the given text.<br>
     This summary is then checked for accuracy using the F1 score from the <a href="https://aclanthology.org/W04-1013.pdf">Rouge package</a>.
-    The reference summary used is the first three sentences of the article.<br><br>
+    The reference summary used is the first three sentences of the text.<br><br>
     <a href="https://github.com/Kaziksobo/Summarizer">Github</a>
 </p>"""
 
@@ -128,12 +72,6 @@ ui = gradio.Interface(
         gradio.inputs.Textbox(
             placeholder='Enter topic/link to article', 
             label = 'Text'
-        ),
-        gradio.inputs.Slider(
-            minimum=0,
-            maximum=100,
-            step=1,
-            label='Summary length'
         )
     ],
     [
@@ -145,7 +83,7 @@ ui = gradio.Interface(
     title='Summariser',
     description=description,
     article=explanation,
-    theme='dark-peach',
+    theme='dark-grass',
     flagging_options=['Incorrect accuracy score', 'Incorrect text summarised', 'other']
 )
 

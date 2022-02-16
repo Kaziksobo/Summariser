@@ -1,3 +1,5 @@
 /flagged
 /venv
 /test.py
+/log.csv
+/__pycache__
